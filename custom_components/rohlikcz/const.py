@@ -59,6 +59,7 @@ SERVICE_UPDATE_DATA = "update_data"
 SERVICE_FETCH_ORDER_HISTORY = "fetch_order_history"
 SERVICE_ENRICH_ORDERS = "enrich_orders"
 SERVICE_REFRESH_SLOTS = "refresh_slots"
+SERVICE_UPDATE_DELIVERY_TIMES = "update_delivery_times"
 
 """ Analytics options """
 CONF_ANALYTICS = "analytics"

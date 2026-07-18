@@ -120,6 +120,18 @@ refresh_slots:
         config_entry:
           integration: rohlikcz
 
+update_delivery_times:
+  name: Update delivery times
+  description: Cheaply refresh only the delivery-time announcement (one request). The delivery ETA of an upcoming order shifts often, so this is light enough to poll every minute shortly before a delivery to keep the delivery time sensor accurate.
+  fields:
+    config_entry_id:
+      name: Account
+      description: The Rohlik account to use
+      required: true
+      selector:
+        config_entry:
+          integration: rohlikcz
+
 search_and_add_to_cart:
   name: Search and add to cart
   description: Search for a product and add to a shopping cart

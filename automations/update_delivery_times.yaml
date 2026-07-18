@@ -1,0 +1,23 @@
+alias: Track Rohlik delivery ETA closely before delivery
+description: >-
+  The delivery ETA of an upcoming order shifts a lot, so the regular 10-minute
+  refresh can be off right before the courier arrives. This automation polls
+  the lightweight update_delivery_times action every minute during the last
+  30 minutes before the expected delivery, keeping the delivery time sensor
+  close to the real ETA.
+mode: single
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+conditions:
+  # Only poll when a delivery is expected within the next 30 minutes (also
+  # keeps polling up to 10 minutes past the ETA in case the courier is late).
+  - condition: template
+    value_template: >-
+      {% set eta = states('sensor.rohlik_cz_delivery_time') %}
+      {{ eta not in ['unknown', 'unavailable']
+         and -600 <= (as_datetime(eta) - now()).total_seconds() <= 1800 }}
+actions:
+  - action: rohlikcz.update_delivery_times
+    data:
+      config_entry_id: XXXXXXXXXXXXXXXX # Replace with your Rohlik.cz config entry ID
