@@ -12,6 +12,8 @@ triggers:
 conditions:
   # Only poll when a delivery is expected within the next 30 minutes (also
   # keeps polling up to 10 minutes past the ETA in case the courier is late).
+  # Replace sensor.rohlik_cz_delivery_time with your own Delivery Time sensor
+  # if it is named differently (e.g. with multiple accounts).
   - condition: template
     value_template: >-
       {% set eta = states('sensor.rohlik_cz_delivery_time') %}
