@@ -751,6 +751,22 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
             self.data["next_delivery_slot"] = result
             self.async_update_listeners()
 
+    async def refresh_delivery_times(self) -> None:
+        """Cheaply refresh only the delivery announcements (delivery-time ETA).
+
+        The announcement carries the shifting delivery ETA for an upcoming
+        order, so this is light enough to poll every minute shortly before a
+        delivery. Updates self.data["delivery_announcements"] in place and
+        notifies entities, without disturbing the rest of the data or the
+        regular refresh cycle.
+        """
+        if not self.data:
+            return
+        result = await self._client.delivery.get_announcements()
+        if result is not None:
+            self.data["delivery_announcements"] = result
+            self.async_update_listeners()
+
     async def async_close(self) -> None:
         """Release resources held by the API client (called on unload)."""
         try:

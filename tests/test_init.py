@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
@@ -205,6 +206,51 @@ async def test_refresh_slots_updates_express_sensor(hass: HomeAssistant) -> None
     # Only the slot data changed; the express sensor flips to available.
     assert account.data["next_delivery_slot"] == fresh_slots
     assert hass.states.get(express_id).state == "on"
+    # Other data is untouched.
+    assert account.data["login"]["data"]["user"]["id"] == 123456
+
+
+async def test_update_delivery_times_updates_delivery_time_sensor(hass: HomeAssistant) -> None:
+    """refresh_delivery_times merges fresh announcements and the delivery time sensor reflects it."""
+    data = sample_api_data()
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    with _patch_get_data(return_value=data):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    delivery_time_id = ent_reg.async_get_entity_id("sensor", DOMAIN, "123456_delivery_time")
+    assert hass.states.get(delivery_time_id).state == "unknown"
+
+    account = entry.runtime_data
+    fresh_announcements = {
+        "data": {
+            "announcements": [
+                {
+                    "id": 9002,
+                    "title": "Delivery",
+                    "updatedAt": "2026-04-26T07:30:00+02:00",
+                    "content": (
+                        'Doručíme <span style="color:#009B37">26.4.</span>'
+                        ' v <span style="color:#009B37">08:00</span>'
+                    ),
+                }
+            ]
+        }
+    }
+    account._client.delivery.get_announcements = AsyncMock(return_value=fresh_announcements)
+
+    await account.refresh_delivery_times()
+    await hass.async_block_till_done()
+
+    # Only the announcement data changed; the delivery time sensor picks up the ETA.
+    assert account.data["delivery_announcements"] == fresh_announcements
+    state = hass.states.get(delivery_time_id).state
+    assert dt_util.parse_datetime(state) == datetime(
+        datetime.now().year, 4, 26, 8, 0, tzinfo=ZoneInfo("Europe/Prague")
+    )
     # Other data is untouched.
     assert account.data["login"]["data"]["user"]["id"] == 123456
 

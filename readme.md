@@ -152,11 +152,15 @@ Each sensor's attributes contain the top N items (configurable, default 10) sort
 | **`rohlikcz.get_cart_content`** | Get the current contents of your shopping cart |
 | **`rohlikcz.update_data`** | Force an immediate full data refresh from Rohlík.cz |
 | **`rohlikcz.refresh_slots`** | Cheaply refresh only the delivery-slot data with a single request — light enough to poll every few seconds to catch express availability |
+| **`rohlikcz.update_delivery_times`** | Cheaply refresh only the delivery-time announcement with a single request — light enough to poll every minute to track the shifting delivery ETA |
 | **`rohlikcz.fetch_order_history`** | Download your complete order history and store it locally (backfill) |
 | **`rohlikcz.enrich_orders`** | Enrich stored orders with item details and product categories to populate the spending sensors |
 
 > [!TIP]
 > Want a notification the moment express delivery opens up? See [`automations/refresh_slots.yaml`](automations/refresh_slots.yaml) for an example that polls `refresh_slots` every 15 seconds while armed and notifies you when the **Express Available** sensor turns on.
+
+> [!TIP]
+> Delivery ETA shifting around before the courier arrives? See [`automations/update_delivery_times.yaml`](automations/update_delivery_times.yaml) for an example that polls `update_delivery_times` every minute during the last 30 minutes before delivery so the **Delivery Time** sensor stays accurate.
 
 ---
 
@@ -164,7 +168,7 @@ Each sensor's attributes contain the top N items (configurable, default 10) sort
 
 Data is refreshed from Rohlík.cz **every 10 minutes** automatically. The update covers account details, premium status, delivery slots, shopping cart, and order history.
 
-You can trigger an immediate refresh at any time using the **`rohlikcz.update_data`** action, or refresh just the delivery slots more frequently with **`rohlikcz.refresh_slots`**.
+You can trigger an immediate refresh at any time using the **`rohlikcz.update_data`** action, refresh just the delivery slots more frequently with **`rohlikcz.refresh_slots`**, or refresh just the delivery-time announcement with **`rohlikcz.update_delivery_times`**.
 
 ---
 
