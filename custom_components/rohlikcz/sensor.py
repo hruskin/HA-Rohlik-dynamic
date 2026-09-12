@@ -155,6 +155,15 @@ class DeliveryTime(BaseEntity, SensorEntity, RestoreEntity):
         """Initialize the delivery time sensor."""
         super().__init__(rohlik_account)
         self._last_value: datetime | None = None
+        self._last_live_value: datetime | None = None
+        self._last_live_order_id: str | None = None
+
+    def _clear_last_live_value(self, order_id: str | None = None) -> None:
+        """Forget a live ETA, optionally only when it belongs to an order."""
+        if order_id is not None and self._last_live_order_id != order_id:
+            return
+        self._last_live_value = None
+        self._last_live_order_id = None
 
     @property
     def native_value(self) -> datetime | None:
@@ -162,14 +171,19 @@ class DeliveryTime(BaseEntity, SensorEntity, RestoreEntity):
 
         The precise delivery time comes from the delivery announcement, but with
         multiple concurrent orders the announcement may relate to a later order
-        rather than the soonest one. In that case (or once the announcement has
-        been cleared) we fall back to the delivery slot of the earliest upcoming
-        order - the same source the delivery slot sensors use - which always
-        reflects the soonest order.
+        rather than the soonest one. In that case we fall back to the delivery
+        slot of the earliest upcoming order. When the announcement is cleared,
+        preserve its last live ETA only while the same order remains the soonest
+        upcoming order.
         """
         announcements: list = self._rohlik_account.data["delivery_announcements"]["data"]["announcements"]
         upcoming_orders: list = self._rohlik_account.data.get("next_order", []) or []
         earliest_order = get_earliest_order(upcoming_orders)
+        earliest_order_id = (
+            str(earliest_order.get("id"))
+            if earliest_order is not None and earliest_order.get("id") is not None
+            else None
+        )
 
         if len(announcements) > 0:
             announcement = announcements[0]
@@ -184,7 +198,41 @@ class DeliveryTime(BaseEntity, SensorEntity, RestoreEntity):
                 delivery_time = extract_delivery_datetime(announcement.get("content", ""))
                 if delivery_time is not None:
                     self._last_value = delivery_time
+                    self._last_live_value = delivery_time
+                    self._last_live_order_id = earliest_order_id
                     return delivery_time
+
+                if (
+                    earliest_order_id is not None
+                    and self._last_live_order_id == earliest_order_id
+                    and self._last_live_value is not None
+                ):
+                    # The announcement can remain present while no longer
+                    # containing an ETA. Preserve the last precise value for
+                    # this order instead of replacing it with the booked slot.
+                    self._last_value = self._last_live_value
+                    return self._last_live_value
+
+            # An announcement for a different order must not allow an older
+            # live ETA to be resurrected after it later disappears.
+            self._clear_last_live_value(earliest_order_id)
+
+        elif (
+            earliest_order_id is not None
+            and self._last_live_order_id == earliest_order_id
+            and self._last_live_value is not None
+        ):
+            # Rohlík commonly clears the announcement shortly before delivery.
+            # Keep its precise ETA while the same order is still the soonest.
+            self._last_value = self._last_live_value
+            return self._last_live_value
+
+        if (
+            earliest_order_id is not None
+            and self._last_live_order_id is not None
+            and self._last_live_order_id != earliest_order_id
+        ):
+            self._clear_last_live_value()
 
         # Fall back to the delivery slot of the soonest order.
         if earliest_order is not None:
@@ -199,6 +247,9 @@ class DeliveryTime(BaseEntity, SensorEntity, RestoreEntity):
         # still exists so it isn't cleared shortly before delivery.
         if self._rohlik_account.is_ordered and self._last_value is not None:
             return self._last_value
+
+        if not self._rohlik_account.is_ordered:
+            self._clear_last_live_value()
         return None
 
     @property
