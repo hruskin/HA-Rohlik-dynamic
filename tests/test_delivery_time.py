@@ -153,10 +153,10 @@ async def test_preserves_live_eta_when_same_announcement_loses_time(
     assert _state_time(hass, entity_id) == live_time
 
 
-async def test_concurrent_order_announcement_keeps_slot_fallback(
+async def test_concurrent_order_announcement_preserves_earliest_live_eta(
     hass: HomeAssistant,
 ) -> None:
-    """An announcement for a later order does not restore an older live ETA."""
+    """A later order's announcement does not erase the earliest live ETA."""
     live_time, slot_start = _delivery_times()
     data = sample_api_data()
     data["next_order"] = [_order(7001, slot_start)]
@@ -178,11 +178,88 @@ async def test_concurrent_order_announcement_keeps_slot_fallback(
     entry.runtime_data.async_set_updated_data(updated_data)
     await hass.async_block_till_done()
 
-    assert _state_time(hass, entity_id) == slot_start
+    assert _state_time(hass, entity_id) == live_time
 
     cleared_data = copy.deepcopy(updated_data)
     cleared_data["delivery_announcements"]["data"]["announcements"] = []
     entry.runtime_data.async_set_updated_data(cleared_data)
     await hass.async_block_till_done()
 
+    assert _state_time(hass, entity_id) == live_time
+
+
+async def test_changed_slot_invalidates_preserved_live_eta(
+    hass: HomeAssistant,
+) -> None:
+    """A rescheduled slot for the same order invalidates its old live ETA."""
+    live_time, slot_start = _delivery_times()
+    data = sample_api_data()
+    data["next_order"] = [_order(7001, slot_start)]
+    data["delivery_announcements"]["data"]["announcements"] = [
+        _announcement(7001, live_time)
+    ]
+
+    entry, entity_id = await _setup_delivery_time(hass, data)
+
+    changed_slot_start = slot_start + timedelta(hours=6)
+    updated_data = copy.deepcopy(data)
+    updated_data["next_order"] = [_order(7001, changed_slot_start)]
+    updated_data["delivery_announcements"]["data"]["announcements"] = []
+    entry.runtime_data.async_set_updated_data(updated_data)
+    await hass.async_block_till_done()
+
+    assert _state_time(hass, entity_id) == changed_slot_start
+
+
+async def test_stale_live_eta_falls_back_to_slot(
+    hass: HomeAssistant,
+) -> None:
+    """A live ETA is not preserved more than one hour after it passes."""
+    live_time, slot_start = _delivery_times()
+    data = sample_api_data()
+    data["next_order"] = [_order(7001, slot_start)]
+    data["delivery_announcements"]["data"]["announcements"] = [
+        _announcement(7001, live_time)
+    ]
+
+    entry, entity_id = await _setup_delivery_time(hass, data)
+
+    updated_data = copy.deepcopy(data)
+    updated_data["delivery_announcements"]["data"]["announcements"] = []
+    with patch(
+        "custom_components.rohlikcz.sensor.dt_util.now",
+        return_value=live_time + timedelta(hours=1, seconds=1),
+    ):
+        entry.runtime_data.async_set_updated_data(updated_data)
+        await hass.async_block_till_done()
+
     assert _state_time(hass, entity_id) == slot_start
+
+
+async def test_preserved_live_eta_survives_reload(
+    hass: HomeAssistant,
+) -> None:
+    """Live ETA metadata is restored when the entry reloads after clearing."""
+    live_time, slot_start = _delivery_times()
+    data = sample_api_data()
+    data["next_order"] = [_order(7001, slot_start)]
+    data["delivery_announcements"]["data"]["announcements"] = [
+        _announcement(7001, live_time)
+    ]
+
+    entry, entity_id = await _setup_delivery_time(hass, data)
+
+    cleared_data = copy.deepcopy(data)
+    cleared_data["delivery_announcements"]["data"]["announcements"] = []
+    entry.runtime_data.async_set_updated_data(cleared_data)
+    await hass.async_block_till_done()
+    assert _state_time(hass, entity_id) == live_time
+
+    with patch(
+        "custom_components.rohlikcz.hub.RohlikAPI.get_data",
+        new=AsyncMock(return_value=cleared_data),
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert _state_time(hass, entity_id) == live_time
