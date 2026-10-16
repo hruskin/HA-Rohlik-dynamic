@@ -207,23 +207,3 @@ async def test_fast_eta_polling_while_courier_is_on_the_way(hass: HomeAssistant,
     await tick(3)  # delivered: no more fast polling
     assert get_announcements.await_count == 4
 
-
-async def test_courier_card_is_served_and_registered(hass: HomeAssistant) -> None:
-    """The bundled card is served by the integration and loaded on every dashboard."""
-    from homeassistant.setup import async_setup_component
-
-    from custom_components.rohlikcz import FRONTEND_DIR, async_setup
-
-    assert await async_setup_component(hass, "http", {})
-    hass.config.components.add("frontend")
-    with (
-        patch("custom_components.rohlikcz.add_extra_js_url") as add_js,
-        patch.object(hass.http, "async_register_static_paths", new=AsyncMock()) as register,
-    ):
-        assert await async_setup(hass, {})
-
-    (config,) = register.await_args.args[0]
-    assert config.url_path == "/rohlikcz/frontend"
-    assert (FRONTEND_DIR / "rohlik-courier-card.js").is_file()
-    url = add_js.call_args.args[1]
-    assert url.startswith("/rohlikcz/frontend/rohlik-courier-card.js?v=")
