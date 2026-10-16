@@ -11,7 +11,7 @@
 > - **Courier on the way** binary sensor — on from the moment the courier leaves with your order until it is delivered, with the courier's name, the number of bags, their phone (shared for the final approach), a `nearby` flag and the departure time as attributes
 > - **Minutes to Delivery** sensor — minutes until the Delivery Time, ticking every minute (negative while the courier is late)
 > - **Faster live ETA** — while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes) instead of every 10, so no polling automation is needed
-> - **Courier card** — a slim full-width dashboard banner (`custom:rohlik-courier-card`) bundled with the integration; see [Courier card](#-courier-card-fork)
+> - **Delivery banner card** — a slim full-width dashboard banner (`custom:rohlik-courier-card`) bundled with the integration, showing the order and then the courier; see [Delivery banner card](#-delivery-banner-card-fork)
 >
 > Versions follow upstream with a fourth number for the fork's changes (`1.0.0.1` = upstream `1.0.0` + courier tracking). The changes are intended to be sent upstream as a pull request.
 
@@ -168,7 +168,7 @@ Each sensor's attributes contain the top N items (configurable, default 10) sort
 
 ---
 
-## 🚚 Courier card *(fork)*
+## 🚚 Delivery banner card *(fork)*
 
 The integration ships a Lovelace card and loads it on every dashboard by itself — no resource to add and no other custom cards needed:
 
@@ -176,13 +176,13 @@ The integration ships a Lovelace card and loads it on every dashboard by itself 
 type: custom:rohlik-courier-card
 ```
 
-It is a slim full-width banner that appears **only while the courier is on the way** and hides itself otherwise (in the dashboard editor it shows a preview). Put it at the top of a sections dashboard. It shows:
+It is a slim full-width banner (same height in every state) that changes with your order and hides itself when there is none (in the dashboard editor it shows a preview). Put it at the top of a sections dashboard.
 
-- the countdown to the live ETA — *nearby* with the courier's phone in the final minutes, *Přijíždí* at arrival and *+N min* in orange when the courier is late,
-- the trip progress from departure to the live ETA; when the ETA moves later the marker slides back and a small *+N* shows how far it shifted,
-- the reusable bags to hand back to the courier.
+- **Ordered** — the delivery window ("09:00 zítra", "okno do 10:00 · za 19 h 21 min"), Rohlík's latest message and the order summary.
+- **Courier on the way** — the countdown to the live ETA (*nearby* with the courier's phone in the final minutes, *Přijíždí* at arrival, *+N min* in orange when late) and the trip progress from departure to the live ETA; when the ETA moves later the marker slides back and a small *+N* shows how far it shifted.
+- Always: the reusable bags to hand back to the courier.
 
-Tapping it opens the **Courier on the way** details. The card finds the integration's entities on its own; with more than one account, pick them with `courier_entity`, `eta_entity`, `minutes_entity` and `bags_entity`.
+Tapping it opens the order or the **Courier on the way** details. The card finds the integration's entities on its own; with more than one account, pick them with `<name>_entity` (`courier`, `eta`, `minutes`, `bags`, `ordered`, `info`, `since`, `till`).
 
 ---
 

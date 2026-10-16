@@ -1,15 +1,19 @@
 /*
- * Rohlík.cz – courier on the way card.
+ * Rohlík.cz – delivery banner card.
  *
- * A slim full-width banner shown only while the courier is on the way: the
- * countdown, the trip progress (departure → live ETA, which keeps moving) and
- * the reusable bags to hand back. Served and loaded by the rohlikcz
- * integration itself, so no dashboard resource is needed:
+ * A slim full-width banner that changes with the order:
+ *   - ordered, courier not yet on the way: the delivery window, Rohlík's
+ *     latest message and the order summary;
+ *   - courier on the way: the countdown, the trip progress (departure → live
+ *     ETA, which keeps moving) and the reusable bags to hand back;
+ *   - no order: hidden.
+ * Served and loaded by the rohlikcz integration itself, so no dashboard
+ * resource is needed:
  *
  *   type: custom:rohlik-courier-card
  *
  * Entities are found by the integration's translation keys; override with
- * `courier_entity`, `eta_entity`, `minutes_entity` or `bags_entity`.
+ * `<name>_entity` (courier, eta, minutes, bags, ordered, info, since, till).
  */
 
 const DOMAIN = "rohlikcz";
@@ -18,6 +22,10 @@ const KEYS = {
   eta: ["sensor", "delivery_time"],
   minutes: ["sensor", "delivery_minutes"],
   bags: ["sensor", "bags_amount"],
+  ordered: ["binary_sensor", "is_ordered"],
+  info: ["sensor", "delivery_info"],
+  since: ["sensor", "next_order_since"],
+  till: ["sensor", "next_order_till"],
 };
 const NEARBY_MINUTES = 8;
 const SHIFT_MINUTES = 5;
@@ -117,6 +125,15 @@ ha-icon { display: block; }
 .shift { color: var(--rk-warn-text); font-weight: 500; font-size: 13px; position: relative; top: -6px; line-height: 0; margin-left: 1px; display: none; }
 .banner--shifted .shift { display: inline; }
 
+.info { grid-area: track; min-width: 0; display: none; }
+.info__msg {
+  font-size: 15px; line-height: 20px; color: var(--rk-text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.info__meta { margin-top: 4px; font-size: 13px; line-height: 16px; color: var(--rk-text-2); font-variant-numeric: tabular-nums; }
+.banner--ordered .info { display: block; }
+.banner--ordered .track { display: none; }
+
 .bags {
   grid-area: bags;
   align-self: stretch;
@@ -194,6 +211,7 @@ const TEMPLATE = `
     </div>
     <div class="track__labels"><span class="track__dep"></span><span class="track__eta"></span></div>
   </div>
+  <div class="info"><div class="info__msg"></div><div class="info__meta"></div></div>
   <div class="bags">
     <div class="bags__icon"><ha-icon icon="mdi:shopping-outline" aria-hidden="true"></ha-icon></div>
     <div class="bags__num"></div>
@@ -209,6 +227,24 @@ const toDate = (value) => {
   const date = value ? new Date(value) : null;
   return date && !isNaN(date) ? date : null;
 };
+const DAY = 86400000;
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+// "dnes" / "zítra" / "čt 23. 10."
+const relativeDay = (date, now) => {
+  const days = Math.round((startOfDay(date) - startOfDay(new Date(now))) / DAY);
+  if (days === 0) return "dnes";
+  if (days === 1) return "zítra";
+  const weekday = date.toLocaleDateString("cs-CZ", { weekday: "short" });
+  return `${weekday} ${date.getDate()}. ${date.getMonth() + 1}.`;
+};
+// "za 14 h 18 min" / "za 40 min"
+const inDuration = (ms) => {
+  const total = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(total / 60), m = total % 60;
+  return h ? `za ${h} h${m ? ` ${m} min` : ""}` : `za ${m} min`;
+};
+const price = (amount) =>
+  `${Number(amount).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} Kč`;
 // "+420000000001" → "000 000 001"
 const formatPhone = (phone) => {
   const digits = String(phone).replace(/\D/g, "").replace(/^420(?=\d{9}$)/, "");
@@ -279,11 +315,11 @@ class RohlikCourierCard extends HTMLElement {
     const $ = (sel) => root.querySelector(sel);
     this._el = {
       banner: $(".banner"), icon: $(".icon ha-icon"), num: $(".count__num"), unit: $(".count__unit"),
-      sub: $(".count__sub"), track: $(".track"), rail: $(".track__rail"), orig: $(".track__orig"),
+      sub: $(".count__sub"), track: $(".track"), msg: $(".info__msg"), meta: $(".info__meta"), rail: $(".track__rail"), orig: $(".track__orig"),
       dep: $(".track__dep"), eta: $(".track__eta"), bagsNum: $(".bags__num"), bagsCap: $(".bags__cap"),
     };
     const open = () => {
-      const entityId = this._entityId("courier");
+      const entityId = this._entityId(this._mode === "ordered" ? "ordered" : "courier");
       if (!entityId) return;
       this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
     };
@@ -298,12 +334,13 @@ class RohlikCourierCard extends HTMLElement {
 
   _data() {
     const courier = this._state("courier");
+    if (courier?.state !== "on" && this._state("ordered")?.state === "on") return this._orderedData();
     if (courier?.state !== "on") {
       if (!(this._preview || this._editMode)) return null;
       // Dashboard editor: show what the banner looks like.
       const now = Date.now();
       return {
-        demo: true, now, dep: new Date(now - 43 * 60000), eta: new Date(now + 47 * 60000),
+        mode: "trip", demo: true, now, dep: new Date(now - 43 * 60000), eta: new Date(now + 47 * 60000),
         eta0: new Date(now + 47 * 60000), mins: 47, courier: "Petr", phone: null, nearby: false, bags: 9,
       };
     }
@@ -316,12 +353,51 @@ class RohlikCourierCard extends HTMLElement {
       : minutesState;
     const bags = Number.parseInt(this._state("bags")?.state, 10);
     return {
-      now, eta, mins: mins ?? null,
+      mode: "trip", now, eta, mins: mins ?? null,
       dep: toDate(a.departed_at),
       eta0: toDate(a.initial_eta) || eta,
       courier: a.courier, phone: a.phone, nearby: a.nearby,
       bags: Number.isNaN(bags) ? null : bags,
     };
+  }
+
+  _orderedData() {
+    const order = this._state("ordered")?.attributes?.order_data || {};
+    const slot = order.deliverySlot || {};
+    const info = this._state("info")?.state;
+    const bags = Number.parseInt(this._state("bags")?.state, 10);
+    return {
+      mode: "ordered", now: Date.now(),
+      since: toDate(this._state("since")?.state) || toDate(slot.since),
+      till: toDate(this._state("till")?.state) || toDate(slot.till),
+      message: info && !["unknown", "unavailable"].includes(info) ? info : null,
+      items: order.itemsCount ?? null,
+      total: order.priceComposition?.total?.amount ?? null,
+      bags: Number.isNaN(bags) ? null : bags,
+    };
+  }
+
+  _renderOrdered(d) {
+    const el = this._el;
+    const started = d.since && d.now >= d.since;
+    el.banner.className = "banner banner--ordered";
+    el.icon.setAttribute("icon", "mdi:package-variant-closed");
+    el.num.textContent = d.since ? hm(d.since) : "–";
+    el.unit.hidden = !d.since;
+    el.unit.textContent = d.since ? relativeDay(d.since, d.now) : "";
+    const till = d.till ? hm(d.till) : null;
+    el.sub.textContent = started
+      ? `okno běží${till ? ` do ${till}` : ""} · kurýr ještě nevyjel`
+      : [till ? `okno do ${till}` : null, d.since ? inDuration(d.since - d.now) : null].filter(Boolean).join(" · ");
+    el.msg.textContent = d.message || "Objednávka čeká na doručení";
+    el.meta.textContent = [
+      d.items != null ? `${d.items} ${plural(d.items, "položka", "položky", "položek")}` : null,
+      d.total != null ? price(d.total) : null,
+    ].filter(Boolean).join(" · ");
+    el.bagsNum.textContent = String(d.bags ?? "–");
+    el.bagsCap.textContent = `${plural(d.bags ?? 0, "taška", "tašky", "tašek")} k vrácení`;
+    el.banner.setAttribute("aria-label",
+      `Rohlík: objednávka${d.since ? ` dorazí ${relativeDay(d.since, d.now)} od ${hm(d.since)}` : ""}${till ? ` do ${till}` : ""}.`);
   }
 
   _render() {
@@ -331,6 +407,12 @@ class RohlikCourierCard extends HTMLElement {
     if (d === null) return;
     if (!this._el) this._build();
     const el = this._el;
+    this._mode = d.mode;
+    this.shadowRoot.querySelector(".preview-note")?.remove();
+    if (d.mode === "ordered") {
+      this._renderOrdered(d);
+      return;
+    }
 
     const mins = d.mins;
     const state = mins === null ? "on-way"
@@ -367,6 +449,7 @@ class RohlikCourierCard extends HTMLElement {
         sub = name ? `Kurýr ${name} je na cestě` : "Kurýr je na cestě";
     }
     el.num.textContent = num;
+    el.unit.textContent = "min";
     el.unit.hidden = state === "arriving";
     el.sub.innerHTML = sub;
 
@@ -396,14 +479,11 @@ class RohlikCourierCard extends HTMLElement {
       : state === "arriving" ? `Rohlík: kurýr přijíždí.${bagsText}`
       : `Rohlík: kurýr dorazí za ${mins ?? "?"} minut${d.eta ? `, v ${hm(d.eta)}` : ""}.${bagsText}`);
 
-    let note = this.shadowRoot.querySelector(".preview-note");
-    if (d.demo && !note) {
-      note = document.createElement("div");
+    if (d.demo) {
+      const note = document.createElement("div");
       note.className = "preview-note";
-      note.textContent = "Náhled · zobrazí se, když kurýr jede";
+      note.textContent = "Náhled · zobrazí se při objednávce";
       el.banner.append(note);
-    } else if (!d.demo && note) {
-      note.remove();
     }
   }
 }
@@ -413,8 +493,8 @@ if (!customElements.get("rohlik-courier-card")) {
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "rohlik-courier-card",
-    name: "Rohlík – kurýr na cestě",
-    description: "Pruh s odpočtem příjezdu kurýra a taškami k vrácení; zobrazí se, jen když kurýr jede.",
+    name: "Rohlík – doručení",
+    description: "Pruh s objednávkou a odpočtem příjezdu kurýra; zobrazí se jen při objednávce.",
     documentationURL: "https://github.com/hruskin/HA-Rohlik-dynamic",
   });
 }
