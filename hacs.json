@@ -1,5 +1,5 @@
 {
-    "name": "Rohlík.cz Custom Integration",
+    "name": "Rohlík.cz Custom Integration (courier tracking fork)",
     "filename": "rohlikcz.zip",
     "hide_default_branch": true,
     "homeassistant": "2025.2.0",

@@ -1,8 +1,18 @@
-# 🛒 Rohlík.cz Integration for Home Assistant
+# 🛒 Rohlík.cz Integration for Home Assistant — courier tracking fork
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub release](https://img.shields.io/github/v/release/dvejsada/HA-RohlikCZ)](https://github.com/dvejsada/HA-RohlikCZ/releases)
+[![GitHub release](https://img.shields.io/github/v/release/hruskin/HA-Rohlik-dynamic)](https://github.com/hruskin/HA-Rohlik-dynamic/releases)
+[![Upstream](https://img.shields.io/badge/fork%20of-dvejsada%2FHA--RohlikCZ-lightgrey)](https://github.com/dvejsada/HA-RohlikCZ)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-%3E%3D2025.2-blue)](https://www.home-assistant.io/)
+
+> [!NOTE]
+> **This is a fork** of [dvejsada/HA-RohlikCZ](https://github.com/dvejsada/HA-RohlikCZ) — all credit for the integration goes to its author. The fork tracks upstream and adds **live courier tracking**:
+>
+> - **Courier on the way** binary sensor — on from the moment the courier leaves with your order until it is delivered, with the courier's name, the number of bags, their phone (shared for the final approach), a `nearby` flag and the departure time as attributes
+> - **Minutes to Delivery** sensor — minutes until the Delivery Time, ticking every minute (negative while the courier is late)
+> - **Faster live ETA** — while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes) instead of every 10, so no polling automation is needed
+>
+> Versions follow upstream with a fourth number for the fork's changes (`1.0.0.1` = upstream `1.0.0` + courier tracking). The changes are intended to be sent upstream as a pull request.
 
 Bring your **[Rohlík.cz](https://www.rohlik.cz)** grocery deliveries into Home Assistant! Track deliveries, monitor your cart, automate shopping, and never miss a delivery window — all from your smart home dashboard.
 
@@ -32,17 +42,17 @@ Bring your **[Rohlík.cz](https://www.rohlik.cz)** grocery deliveries into Home 
 
 Install in one click via the Home Assistant Community Store:
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dvejsada&repository=HA-RohlikCZ&category=Integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=hruskin&repository=HA-Rohlik-dynamic&category=Integration)
 
 > Don't have HACS yet? [Get it here](https://hacs.xyz/).
 
 #### Trying pre-releases
 
-New versions are sometimes published as pre-releases (betas) first. HACS hides them by default; to try one, open **Rohlík.cz** in HACS, click **⋮ → Redownload**, enable **Show beta versions** and pick the version. Please [report anything you run into](https://github.com/dvejsada/HA-RohlikCZ/issues).
+New versions are sometimes published as pre-releases (betas) first. HACS hides them by default; to try one, open **Rohlík.cz** in HACS, click **⋮ → Redownload**, enable **Show beta versions** and pick the version. Please [report anything you run into](https://github.com/hruskin/HA-Rohlik-dynamic/issues).
 
 ### Option 2 — Manual Installation
 
-1. Download `rohlikcz.zip` from the [latest release](https://github.com/dvejsada/HA-RohlikCZ/releases/latest).
+1. Download `rohlikcz.zip` from the [latest release](https://github.com/hruskin/HA-Rohlik-dynamic/releases/latest).
 2. Extract it into a new `config/custom_components/rohlikcz/` directory in your Home Assistant configuration.
 3. Restart Home Assistant.
 
@@ -94,6 +104,7 @@ Enabling analytics triggers a one-time download of your full order history (this
 | **Timeslot Reservation** | Active when you have a reserved delivery timeslot |
 | **Parents Club** | Active when you are a member of the Parents Club |
 | **Express Available** | Active when express delivery is currently available in your area |
+| **Courier on the way** | Active from the courier's departure until delivery; `departed_at`, `courier`, `bags`, `phone`, `nearby`, `title` and `message` as attributes *(fork)* |
 
 ### 🟢 Sensors
 
@@ -116,6 +127,7 @@ Enabling analytics triggers a one-time download of your full order history (this
 | **Delivery Slot Start** | Start of the delivery window for your next order |
 | **Delivery Slot End** | End of the delivery window for your next order |
 | **Delivery Time** | Predicted exact delivery time for your next order |
+| **Minutes to Delivery** | Minutes until the Delivery Time, updated every minute *(fork)* |
 | **Monthly Spent** | Total amount spent this month |
 | **Yearly Spent** | Total amount spent this year *(requires Spending Analytics)* |
 | **All Time Spent** | Total spent across all tracked orders *(requires Spending Analytics)*; the `by_year` attribute breaks the total down per year (`total` and `order_count` per year) |
@@ -174,13 +186,13 @@ Each sensor's attributes contain the top N items (configurable, default 10) sort
 > Want a notification the moment express delivery opens up? See [`automations/refresh_slots.yaml`](automations/refresh_slots.yaml) for an example that polls `refresh_slots` every 15 seconds while armed and notifies you when the **Express Available** sensor turns on.
 
 > [!TIP]
-> Delivery ETA shifting around before the courier arrives? See [`automations/update_delivery_times.yaml`](automations/update_delivery_times.yaml) for an example that polls `update_delivery_times` every minute during the last 30 minutes before delivery so the **Delivery Time** sensor stays accurate.
+> This fork refreshes the live ETA on its own while the courier is on the way (every 2 minutes, every minute in the final 15 minutes), so the [`automations/update_delivery_times.yaml`](automations/update_delivery_times.yaml) polling example is no longer needed.
 
 ---
 
 ## 🔄 Data Updates
 
-Data is refreshed from Rohlík.cz **every 10 minutes** automatically. The update covers account details, premium status, delivery slots, shopping cart, and order history.
+Data is refreshed from Rohlík.cz **every 10 minutes** automatically; while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes). The update covers account details, premium status, delivery slots, shopping cart, and order history.
 
 You can trigger an immediate refresh at any time using the **`rohlikcz.update_data`** action, refresh just the delivery slots more frequently with **`rohlikcz.refresh_slots`**, or refresh just the delivery-time announcement with **`rohlikcz.update_delivery_times`**.
 
@@ -210,8 +222,8 @@ Want to do your Rohlík.cz shopping by **just talking to your AI assistant**? Ch
 
 ## 🤝 Contributing & Support
 
-- 🐛 Found a bug? [Open an issue](https://github.com/dvejsada/HA-RohlikCZ/issues)
-- 💬 Have a question or idea? Use the [Discussions](https://github.com/dvejsada/HA-RohlikCZ/discussions) tab
-- ⭐ If you find this integration useful, consider giving the repository a star!
+- 🐛 Found a bug in courier tracking? [Open an issue in this fork](https://github.com/hruskin/HA-Rohlik-dynamic/issues)
+- 🛒 Anything else about the integration belongs [upstream](https://github.com/dvejsada/HA-RohlikCZ/issues) — questions and ideas in its [Discussions](https://github.com/dvejsada/HA-RohlikCZ/discussions)
+- ⭐ If you find this integration useful, give the [original repository](https://github.com/dvejsada/HA-RohlikCZ) a star!
 
 > **Disclaimer:** This integration is an independent community project and is not affiliated with, endorsed by, or supported by Rohlík.cz. Changes to the Rohlík.cz platform may affect functionality.

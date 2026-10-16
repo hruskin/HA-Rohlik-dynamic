@@ -1,12 +1,12 @@
 {
   "domain": "rohlikcz",
   "name": "Rohlík.cz",
-  "codeowners": ["@dvejsada"],
+  "codeowners": ["@hruskin", "@dvejsada"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/dvejsada/HA-RohlikCZ",
+  "documentation": "https://github.com/hruskin/HA-Rohlik-dynamic",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/dvejsada/HA-RohlikCZ/issues",
+  "issue_tracker": "https://github.com/hruskin/HA-Rohlik-dynamic/issues",
   "requirements": ["rohlik-api==0.3.0"],
-  "version": "1.0.0.1"
+  "version": "1.0.0.2"
 }
