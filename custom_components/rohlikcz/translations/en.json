@@ -136,6 +136,13 @@
           "on": "Yes",
           "off": "No"
         }
+      },
+      "courier_on_the_way": {
+        "name": "Courier on the way",
+        "state": {
+          "on": "Yes",
+          "off": "No"
+        }
       }
     },
     "sensor": {
@@ -235,6 +242,9 @@
       },
       "items_all_time": {
         "name": "Items All Time"
+      },
+      "delivery_minutes": {
+        "name": "Minutes to delivery"
       }
     },
     "todo": {

@@ -1,20 +1,24 @@
 """Platform for binary sensor."""
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, STATE_UNKNOWN
+from homeassistant.const import EntityCategory, STATE_ON, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, ICON_REUSABLE, ICON_PARENTCLUB, ICON_PREMIUM, ICON_ORDER, ICON_TIMESLOT, ICON_CALENDAR_CHECK, \
-    ICON_CALENDAR_REMOVE
+    ICON_CALENDAR_REMOVE, ICON_COURIER
 from .entity import BaseEntity
 from .hub import RohlikAccount
-from .utils import get_earliest_order
+from .utils import get_earliest_order, parse_courier_details
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -29,7 +33,8 @@ async def async_setup_entry(
         IsPremiumSensor(rohlik_account),
         IsOrderedSensor(rohlik_account),
         IsReservedSensor(rohlik_account),
-        IsExpressAvailable(rohlik_account)
+        IsExpressAvailable(rohlik_account),
+        CourierOnTheWay(rohlik_account),
     ])
 
 class IsExpressAvailable(BaseEntity, BinarySensorEntity):
@@ -165,3 +170,54 @@ class IsReservedSensor(BaseEntity, BinarySensorEntity):
     @property
     def icon(self) -> str:
         return ICON_TIMESLOT
+
+
+class CourierOnTheWay(BaseEntity, BinarySensorEntity, RestoreEntity):
+    """Sensor for whether the courier is on the way with an order.
+
+    On from the first live countdown announcement until the order is delivered,
+    which makes it a good condition for showing a delivery card.
+    """
+
+    _attr_translation_key = "courier_on_the_way"
+    _attr_should_poll = False
+
+    @property
+    def is_on(self) -> bool:
+        return self._rohlik_account.courier_announcement is not None
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        announcement = self._rohlik_account.courier_announcement
+        if announcement is None:
+            return None
+        order_id = str(announcement.get("id"))
+        details = parse_courier_details(announcement.get("additionalContent"))
+        return {
+            "order_id": order_id,
+            "departed_at": self._rohlik_account.courier_departed_at(order_id),
+            "courier": details["courier"],
+            "bags": details["bags"],
+            "phone": details["phone"],
+            # Rohlík adds the courier's phone number for the final approach.
+            "nearby": details["phone"] is not None,
+            "title": announcement.get("title"),
+            "message": re.sub(r'<[^>]+>', '', announcement.get("content") or ""),
+        }
+
+    @property
+    def icon(self) -> str:
+        return ICON_COURIER
+
+    async def async_added_to_hass(self) -> None:
+        """Keep the departure time across a restart while the same courier is on the way."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state != STATE_ON:
+            return
+        order_id = last_state.attributes.get("order_id")
+        departed_at = last_state.attributes.get("departed_at")
+        if isinstance(departed_at, str):
+            departed_at = dt_util.parse_datetime(departed_at)
+        if order_id and isinstance(departed_at, datetime):
+            self._rohlik_account.restore_courier_departure(str(order_id), departed_at)

@@ -9,19 +9,27 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from rohlik_api import InvalidCredentialsError, RohlikAPI, RohlikAPIError, Site
 
 from .const import DOMAIN, get_site
+from .utils import extract_delivery_datetime, is_courier_on_the_way
 
 #: How often the integration refreshes data from the Rohlik API.
 UPDATE_INTERVAL = timedelta(seconds=600)
+
+#: While the courier is on the way, the delivery announcement (live ETA) is
+#: refreshed this often, and every minute for the final approach.
+COURIER_POLL_INTERVAL = timedelta(minutes=2)
+COURIER_FINAL_POLL_INTERVAL = timedelta(minutes=1)
+COURIER_FINAL_APPROACH = timedelta(minutes=15)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -411,6 +419,10 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         # When each delivery announcement (keyed by order ID and text) was first
         # received; see announcement_received_at().
         self._announcement_arrivals: dict[tuple[str, str], datetime] = {}
+        # When the courier left with each order (order ID -> first live
+        # countdown announcement), and the pending fast announcement poll.
+        self._courier_departures: dict[str, datetime] = {}
+        self._unsub_courier_poll: CALLBACK_TYPE | None = None
         # _store_lock guards brief in-memory store mutations (contended by the
         # refresh cycle). _enrich_lock serializes whole enrichment runs and may
         # be held across network I/O without blocking the refresh.
@@ -494,6 +506,8 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
     def async_update_listeners(self) -> None:
         """Record newly arrived delivery announcements, then notify entities."""
         self._track_announcement_arrivals()
+        self._track_courier_departure()
+        self._schedule_courier_poll()
         super().async_update_listeners()
 
     @callback
@@ -512,6 +526,70 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
             key = self._announcement_key(announcement)
             arrivals[key] = self._announcement_arrivals.get(key, now)
         self._announcement_arrivals = arrivals
+
+    @property
+    def courier_announcement(self) -> dict | None:
+        """The delivery announcement of an order whose courier is on the way."""
+        announcements = (
+            ((self.data or {}).get("delivery_announcements") or {}).get("data") or {}
+        ).get("announcements") or []
+        return next((a for a in announcements if is_courier_on_the_way(a)), None)
+
+    @callback
+    def _track_courier_departure(self) -> None:
+        """Remember when the courier left, i.e. when the live countdown started."""
+        announcement = self.courier_announcement
+        if announcement is None:
+            self._courier_departures = {}
+            return
+        order_id = str(announcement.get("id"))
+        self._courier_departures = {
+            order_id: self._courier_departures.get(order_id)
+            or self.announcement_received_at(announcement)
+        }
+
+    def courier_departed_at(self, order_id: str) -> datetime | None:
+        """When the courier left with the order, if they are on the way."""
+        return self._courier_departures.get(order_id)
+
+    @callback
+    def restore_courier_departure(self, order_id: str, departed_at: datetime) -> None:
+        """Keep the departure time recorded before a restart for the same order."""
+        current = self._courier_departures.get(order_id)
+        if current is not None and departed_at < current:
+            self._courier_departures[order_id] = departed_at
+
+    @callback
+    def _schedule_courier_poll(self) -> None:
+        """Poll the live ETA more often than the regular refresh while the courier is on the way."""
+        if self._unsub_courier_poll is not None:
+            self._unsub_courier_poll()
+            self._unsub_courier_poll = None
+        announcement = self.courier_announcement
+        if announcement is None:
+            return
+        eta = extract_delivery_datetime(
+            announcement.get("content", ""),
+            self.announcement_received_at(announcement),
+            tz=self._timezone,
+        )
+        final = eta is not None and eta - dt_util.now() <= COURIER_FINAL_APPROACH
+        self._unsub_courier_poll = async_call_later(
+            self.hass,
+            COURIER_FINAL_POLL_INTERVAL if final else COURIER_POLL_INTERVAL,
+            self._async_courier_poll,
+        )
+
+    async def _async_courier_poll(self, _now: datetime) -> None:
+        self._unsub_courier_poll = None
+        try:
+            await self.refresh_delivery_times()
+        except RohlikAPIError as err:
+            _LOGGER.debug("Courier ETA refresh failed: %s", err)
+        # A successful refresh reschedules itself via async_update_listeners;
+        # keep polling after a failed or empty one.
+        if self._unsub_courier_poll is None:
+            self._schedule_courier_poll()
 
     def announcement_received_at(self, announcement: dict) -> datetime:
         """Return when a delivery announcement's current text was first received.
@@ -832,6 +910,9 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         # Home Assistant detaches it itself when the entry unloads - closing it
         # here would only trip the "custom integration closes the Home
         # Assistant aiohttp session" warning.
+        if self._unsub_courier_poll is not None:
+            self._unsub_courier_poll()
+            self._unsub_courier_poll = None
         await self._client.close()
 
     # New service methods

@@ -10,14 +10,15 @@ from typing import Any, Literal
 from dataclasses import dataclass
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EntityCategory, STATE_UNAVAILABLE, UnitOfTime
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import dt as dt_util
 from .const import DOMAIN, ICON_UPDATE, ICON_CREDIT, ICON_NO_LIMIT, ICON_FREE_EXPRESS, ICON_DELIVERY, ICON_BAGS, \
     ICON_CART, ICON_ACCOUNT, ICON_EMAIL, ICON_PHONE, ICON_PREMIUM_DAYS, ICON_LAST_ORDER, ICON_NEXT_ORDER_SINCE, \
-    ICON_NEXT_ORDER_TILL, ICON_INFO, ICON_DELIVERY_TIME, ICON_MONTHLY_SPENT, ICON_YEARLY_SPENT, ICON_ALLTIME_SPENT, \
+    ICON_NEXT_ORDER_TILL, ICON_INFO, ICON_DELIVERY_TIME, ICON_DELIVERY_MINUTES, ICON_MONTHLY_SPENT, ICON_YEARLY_SPENT, ICON_ALLTIME_SPENT, \
     ICON_CATEGORY_SPENDING
 from .entity import BaseEntity
 from .hub import OrderStore, RohlikAccount
@@ -35,6 +36,7 @@ async def async_setup_entry(
     """Add sensors for passed config_entry in HA."""
     rohlik_hub: RohlikAccount = config_entry.runtime_data
     analytics = rohlik_hub.analytics
+    delivery_time = DeliveryTime(rohlik_hub)
 
     entities = [
         FirstDeliverySensor(rohlik_hub),
@@ -51,7 +53,8 @@ async def async_setup_entry(
         NextOrderTill(rohlik_hub),
         NextOrderSince(rohlik_hub),
         DeliveryInfo(rohlik_hub),
-        DeliveryTime(rohlik_hub),
+        delivery_time,
+        DeliveryMinutes(rohlik_hub, delivery_time),
         MonthlySpent(rohlik_hub),
     ]
 
@@ -383,6 +386,44 @@ class DeliveryTime(BaseEntity, SensorEntity, RestoreEntity):
                 self._last_live_value = restored.last_live_value
                 self._last_live_order_id = restored.last_live_order_id
                 self._last_live_slot_since = restored.last_live_slot_since
+
+
+class DeliveryMinutes(BaseEntity, SensorEntity):
+    """Sensor counting down the minutes until the delivery time.
+
+    Follows the Delivery Time sensor (live ETA or booked slot) and ticks every
+    minute; it goes negative while the courier is late and is unknown when no
+    order is on its way.
+    """
+
+    _attr_translation_key = "delivery_minutes"
+    _attr_should_poll = False
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(self, rohlik_account: RohlikAccount, delivery_time: DeliveryTime) -> None:
+        super().__init__(rohlik_account)
+        self._delivery_time = delivery_time
+
+    @property
+    def native_value(self) -> int | None:
+        eta = self._delivery_time.native_value
+        if eta is None:
+            return None
+        return int((eta - dt_util.now()).total_seconds() // 60)
+
+    @property
+    def icon(self) -> str:
+        return ICON_DELIVERY_MINUTES
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1))
+        )
+
+    @callback
+    def _async_tick(self, _now: datetime) -> None:
+        self.async_write_ha_state()
 
 
 @dataclass(frozen=True, kw_only=True)

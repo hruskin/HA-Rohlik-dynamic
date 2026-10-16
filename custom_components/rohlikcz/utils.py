@@ -2,6 +2,7 @@ import codecs
 from datetime import timedelta, datetime, time
 import html
 import json
+from typing import Any
 from zoneinfo import ZoneInfo
 import re
 
@@ -79,6 +80,21 @@ def _resolve_clock_time(
     return delivery_dt
 
 
+def _decode_escapes(text: str) -> str:
+    """Decode literal backslash escapes (\\u010d, \\xa0, ...) in a double-encoded payload.
+
+    The text normally arrives already decoded from JSON, so non-ASCII characters
+    (Czech diacritics) must be left untouched rather than round-tripped through
+    the unicode_escape codec.
+    """
+    return _ESCAPE_PATTERN.sub(lambda m: codecs.decode(m.group(0), 'unicode_escape'), text)
+
+
+def _plain_text(text: str) -> str:
+    """Plain text without HTML tags or entities (&nbsp;) for pattern detection."""
+    return html.unescape(re.sub(r'<[^>]+>', '', text))
+
+
 def extract_delivery_datetime(
     text: str, received_at: datetime | None = None, tz: ZoneInfo | None = None
 ) -> datetime | None:
@@ -104,15 +120,8 @@ def extract_delivery_datetime(
         A timezone-aware datetime object representing the delivery time, or None if no valid time found
     """
 
-    # Decode literal backslash escapes. The text normally arrives already
-    # decoded from JSON, so non-ASCII characters (Czech diacritics) must be left
-    # untouched rather than round-tripped through the unicode_escape codec.
-    clean_text: str = _ESCAPE_PATTERN.sub(
-        lambda m: codecs.decode(m.group(0), 'unicode_escape'), text
-    )
-
-    # Get plain text without HTML tags or entities (&nbsp;) for pattern detection
-    plain_text: str = html.unescape(re.sub(r'<[^>]+>', '', clean_text))
+    clean_text: str = _decode_escapes(text)
+    plain_text: str = _plain_text(clean_text)
 
     local_tz = tz or ZoneInfo('Europe/Prague')
     now = datetime.now(tz=local_tz)
@@ -194,6 +203,43 @@ def parse_delivery_datetime_string(datetime_str: str) -> datetime | None:
                 # fall through and let the function return None to signal parse failure.
                 pass
             return None
+
+
+def is_courier_on_the_way(announcement: dict | None) -> bool:
+    """Whether a delivery announcement says the courier has left with the order.
+
+    Before departure Rohlík only estimates the arrival from the booked slot
+    ("kurýr dorazí zhruba v 09:00"); once the courier is on the way the
+    announcement switches to a live countdown ("Váš nákup doručíme přibližně za
+    89 minut, tedy v 08:47.", titled "Nákup už frčí k Vám!").
+    """
+    if not announcement:
+        return False
+    content = _plain_text(_decode_escapes(announcement.get("content") or ""))
+    return _MINUTES_UNTIL_PATTERN.search(content) is not None
+
+
+# "Petr už Vám veze celkem 6 tašek. A kdyby něco, je na čísle +420000000001."
+# Rohlík adds the phone number only for the final few minutes of the approach.
+_COURIER_NAME_PATTERN = re.compile(r'^\s*([^\s.,]+)\s+už\b')
+_COURIER_BAGS_PATTERN = re.compile(r'\bcelkem\s+(\d{1,3})\s+taš(?:ek|ky|ku|ka)\b', re.IGNORECASE)
+_COURIER_PHONE_PATTERN = re.compile(r'(\+?\d(?:[\s\u00a0]?\d){8,14})')
+
+
+def parse_courier_details(additional_content: str | None) -> dict[str, Any]:
+    """Extract the courier's name, the number of bags and the phone number.
+
+    Each value is None when the announcement does not mention it.
+    """
+    text = _plain_text(_decode_escapes(additional_content or "")).strip()
+    name = _COURIER_NAME_PATTERN.search(text)
+    bags = _COURIER_BAGS_PATTERN.search(text)
+    phone = _COURIER_PHONE_PATTERN.search(text)
+    return {
+        "courier": name.group(1) if name else None,
+        "bags": int(bags.group(1)) if bags else None,
+        "phone": re.sub(r'[\s\u00a0]', '', phone.group(1)) if phone else None,
+    }
 
 
 def get_earliest_order(orders: list) -> dict | None:

@@ -136,6 +136,13 @@
           "on": "Ano",
           "off": "Ne"
         }
+      },
+      "courier_on_the_way": {
+        "name": "Kurýr na cestě",
+        "state": {
+          "on": "Ano",
+          "off": "Ne"
+        }
       }
     },
     "sensor": {
@@ -235,6 +242,9 @@
       },
       "items_all_time": {
         "name": "Položky celkem"
+      },
+      "delivery_minutes": {
+        "name": "Minuty do doručení"
       }
     },
     "todo": {
