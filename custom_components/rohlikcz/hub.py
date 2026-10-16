@@ -420,8 +420,10 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         # received; see announcement_received_at().
         self._announcement_arrivals: dict[tuple[str, str], datetime] = {}
         # When the courier left with each order (order ID -> first live
-        # countdown announcement), and the pending fast announcement poll.
+        # countdown announcement) and the ETA announced at that moment, and the
+        # pending fast announcement poll.
         self._courier_departures: dict[str, datetime] = {}
+        self._courier_initial_etas: dict[str, datetime | None] = {}
         self._unsub_courier_poll: CALLBACK_TYPE | None = None
         # _store_lock guards brief in-memory store mutations (contended by the
         # refresh cycle). _enrich_lock serializes whole enrichment runs and may
@@ -541,23 +543,41 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         announcement = self.courier_announcement
         if announcement is None:
             self._courier_departures = {}
+            self._courier_initial_etas = {}
             return
         order_id = str(announcement.get("id"))
+        if order_id not in self._courier_departures:
+            self._courier_initial_etas = {order_id: self._announcement_eta(announcement)}
         self._courier_departures = {
             order_id: self._courier_departures.get(order_id)
             or self.announcement_received_at(announcement)
         }
 
+    def _announcement_eta(self, announcement: dict) -> datetime | None:
+        return extract_delivery_datetime(
+            announcement.get("content", ""),
+            self.announcement_received_at(announcement),
+            tz=self._timezone,
+        )
+
     def courier_departed_at(self, order_id: str) -> datetime | None:
         """When the courier left with the order, if they are on the way."""
         return self._courier_departures.get(order_id)
 
+    def courier_initial_eta(self, order_id: str) -> datetime | None:
+        """The ETA announced when the courier left, to tell how far it has shifted."""
+        return self._courier_initial_etas.get(order_id)
+
     @callback
-    def restore_courier_departure(self, order_id: str, departed_at: datetime) -> None:
-        """Keep the departure time recorded before a restart for the same order."""
+    def restore_courier_departure(
+        self, order_id: str, departed_at: datetime, initial_eta: datetime | None = None
+    ) -> None:
+        """Keep the departure (and its ETA) recorded before a restart for the same order."""
         current = self._courier_departures.get(order_id)
         if current is not None and departed_at < current:
             self._courier_departures[order_id] = departed_at
+            if initial_eta is not None:
+                self._courier_initial_etas[order_id] = initial_eta
 
     @callback
     def _schedule_courier_poll(self) -> None:
@@ -568,11 +588,7 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         announcement = self.courier_announcement
         if announcement is None:
             return
-        eta = extract_delivery_datetime(
-            announcement.get("content", ""),
-            self.announcement_received_at(announcement),
-            tz=self._timezone,
-        )
+        eta = self._announcement_eta(announcement)
         final = eta is not None and eta - dt_util.now() <= COURIER_FINAL_APPROACH
         self._unsub_courier_poll = async_call_later(
             self.hass,

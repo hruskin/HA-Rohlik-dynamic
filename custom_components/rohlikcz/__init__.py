@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -20,8 +26,29 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = ["sensor", "binary_sensor", "todo", "calendar"]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+#: Lovelace cards bundled with the integration, loaded on every dashboard.
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_URL = f"/{DOMAIN}/frontend"
+FRONTEND_CARDS = ["rohlik-courier-card.js"]
+
 #: Typed config entry whose runtime_data is the coordinator.
 type RohlikConfigEntry = ConfigEntry[RohlikAccount]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Serve the bundled Lovelace cards so dashboards can use them without a resource."""
+    if hass.http is None or "frontend" not in hass.config.components:
+        return True
+    version = (await async_get_integration(hass, DOMAIN)).version
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL, str(FRONTEND_DIR), True)]
+    )
+    for card in FRONTEND_CARDS:
+        # The version query busts the browser cache after an update.
+        add_extra_js_url(hass, f"{FRONTEND_URL}/{card}?v={version}")
+    return True
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

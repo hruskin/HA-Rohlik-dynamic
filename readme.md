@@ -11,6 +11,7 @@
 > - **Courier on the way** binary sensor — on from the moment the courier leaves with your order until it is delivered, with the courier's name, the number of bags, their phone (shared for the final approach), a `nearby` flag and the departure time as attributes
 > - **Minutes to Delivery** sensor — minutes until the Delivery Time, ticking every minute (negative while the courier is late)
 > - **Faster live ETA** — while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes) instead of every 10, so no polling automation is needed
+> - **Courier card** — a slim full-width dashboard banner (`custom:rohlik-courier-card`) bundled with the integration; see [Courier card](#-courier-card-fork)
 >
 > Versions follow upstream with a fourth number for the fork's changes (`1.0.0.1` = upstream `1.0.0` + courier tracking). The changes are intended to be sent upstream as a pull request.
 
@@ -104,7 +105,7 @@ Enabling analytics triggers a one-time download of your full order history (this
 | **Timeslot Reservation** | Active when you have a reserved delivery timeslot |
 | **Parents Club** | Active when you are a member of the Parents Club |
 | **Express Available** | Active when express delivery is currently available in your area |
-| **Courier on the way** | Active from the courier's departure until delivery; `departed_at`, `courier`, `bags`, `phone`, `nearby`, `title` and `message` as attributes *(fork)* |
+| **Courier on the way** | Active from the courier's departure until delivery; `departed_at`, `initial_eta` (ETA announced at departure), `courier`, `bags`, `phone`, `nearby`, `title` and `message` as attributes *(fork)* |
 
 ### 🟢 Sensors
 
@@ -164,6 +165,24 @@ When analytics levels are enabled in the integration options, the following sens
 - **Per-Item** - Spending by individual product (e.g. Tchibo Barista, Savo Spray)
 
 Each sensor's attributes contain the top N items (configurable, default 10) sorted by spending, with `total_count`, `spent`, `units`, and `avg_unit_price` per entry.
+
+---
+
+## 🚚 Courier card *(fork)*
+
+The integration ships a Lovelace card and loads it on every dashboard by itself — no resource to add and no other custom cards needed:
+
+```yaml
+type: custom:rohlik-courier-card
+```
+
+It is a slim full-width banner that appears **only while the courier is on the way** and hides itself otherwise (in the dashboard editor it shows a preview). Put it at the top of a sections dashboard. It shows:
+
+- the countdown to the live ETA — *nearby* with the courier's phone in the final minutes, *Přijíždí* at arrival and *+N min* in orange when the courier is late,
+- the trip progress from departure to the live ETA; when the ETA moves later the marker slides back and a small *+N* shows how far it shifted,
+- the reusable bags to hand back to the courier.
+
+Tapping it opens the **Courier on the way** details. The card finds the integration's entities on its own; with more than one account, pick them with `courier_entity`, `eta_entity`, `minutes_entity` and `bags_entity`.
 
 ---
 

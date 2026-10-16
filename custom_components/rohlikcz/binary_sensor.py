@@ -196,6 +196,7 @@ class CourierOnTheWay(BaseEntity, BinarySensorEntity, RestoreEntity):
         return {
             "order_id": order_id,
             "departed_at": self._rohlik_account.courier_departed_at(order_id),
+            "initial_eta": self._rohlik_account.courier_initial_eta(order_id),
             "courier": details["courier"],
             "bags": details["bags"],
             "phone": details["phone"],
@@ -217,7 +218,12 @@ class CourierOnTheWay(BaseEntity, BinarySensorEntity, RestoreEntity):
             return
         order_id = last_state.attributes.get("order_id")
         departed_at = last_state.attributes.get("departed_at")
+        initial_eta = last_state.attributes.get("initial_eta")
         if isinstance(departed_at, str):
             departed_at = dt_util.parse_datetime(departed_at)
+        if isinstance(initial_eta, str):
+            initial_eta = dt_util.parse_datetime(initial_eta)
         if order_id and isinstance(departed_at, datetime):
-            self._rohlik_account.restore_courier_departure(str(order_id), departed_at)
+            self._rohlik_account.restore_courier_departure(
+                str(order_id), departed_at, initial_eta if isinstance(initial_eta, datetime) else None
+            )

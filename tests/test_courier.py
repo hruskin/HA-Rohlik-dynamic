@@ -132,6 +132,8 @@ async def test_courier_on_the_way_lifecycle(hass: HomeAssistant) -> None:
     assert state.attributes["bags"] == 6
     assert state.attributes["nearby"] is False
     assert abs(state.attributes["departed_at"] - departed) < timedelta(seconds=5)
+    initial_eta = state.attributes["initial_eta"]
+    assert (initial_eta.hour, initial_eta.minute) == (8, 47)
 
     # A new announcement text keeps the original departure time.
     entry.runtime_data.async_set_updated_data(
@@ -142,6 +144,7 @@ async def test_courier_on_the_way_lifecycle(hass: HomeAssistant) -> None:
     assert state.attributes["nearby"] is True
     assert state.attributes["phone"] == "+420000000001"
     assert abs(state.attributes["departed_at"] - departed) < timedelta(seconds=5)
+    assert state.attributes["initial_eta"] == initial_eta
 
     entry.runtime_data.async_set_updated_data(_with_announcements(data))
     await hass.async_block_till_done()
@@ -203,3 +206,24 @@ async def test_fast_eta_polling_while_courier_is_on_the_way(hass: HomeAssistant,
     assert get_announcements.await_count == 4
     await tick(3)  # delivered: no more fast polling
     assert get_announcements.await_count == 4
+
+
+async def test_courier_card_is_served_and_registered(hass: HomeAssistant) -> None:
+    """The bundled card is served by the integration and loaded on every dashboard."""
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.rohlikcz import FRONTEND_DIR, async_setup
+
+    assert await async_setup_component(hass, "http", {})
+    hass.config.components.add("frontend")
+    with (
+        patch("custom_components.rohlikcz.add_extra_js_url") as add_js,
+        patch.object(hass.http, "async_register_static_paths", new=AsyncMock()) as register,
+    ):
+        assert await async_setup(hass, {})
+
+    (config,) = register.await_args.args[0]
+    assert config.url_path == "/rohlikcz/frontend"
+    assert (FRONTEND_DIR / "rohlik-courier-card.js").is_file()
+    url = add_js.call_args.args[1]
+    assert url.startswith("/rohlikcz/frontend/rohlik-courier-card.js?v=")
