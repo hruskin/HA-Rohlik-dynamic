@@ -13,7 +13,7 @@
 > - **Faster live ETA** — while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes) instead of every 10, so no polling automation is needed
 > - **Delivery banner card** — a slim full-width dashboard banner (`custom:rohlik-courier-card`) bundled with the integration, showing the order and then the courier; see [Delivery banner card](#-delivery-banner-card-fork)
 >
-> Versions follow upstream with a fourth number for the fork's changes (`1.0.0.1` = upstream `1.0.0` + courier tracking). The changes are intended to be sent upstream as a pull request.
+> The fork has its own version numbers: `1.0.1` = upstream `1.0.0` + courier tracking and the delivery banner card. The changes are intended to be sent upstream as a pull request.
 
 Bring your **[Rohlík.cz](https://www.rohlik.cz)** grocery deliveries into Home Assistant! Track deliveries, monitor your cart, automate shopping, and never miss a delivery window — all from your smart home dashboard.
 
