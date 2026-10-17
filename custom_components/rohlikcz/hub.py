@@ -20,7 +20,7 @@ from homeassistant.util import dt as dt_util
 from rohlik_api import InvalidCredentialsError, RohlikAPI, RohlikAPIError, Site
 
 from .const import DOMAIN, get_site
-from .utils import extract_delivery_datetime, is_courier_on_the_way
+from .utils import extract_delivery_datetime, get_earliest_order, is_courier_on_the_way
 
 #: How often the integration refreshes data from the Rohlik API.
 UPDATE_INTERVAL = timedelta(seconds=600)
@@ -425,6 +425,10 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
         self._courier_departures: dict[str, datetime] = {}
         self._courier_initial_etas: dict[str, datetime | None] = {}
         self._unsub_courier_poll: CALLBACK_TYPE | None = None
+        # Line items of the next order, keyed by what changes when items are
+        # added (order ID, item count, total quantity) so they are only
+        # re-fetched then.
+        self._next_order_items: tuple[tuple, list[dict]] | None = None
         # _store_lock guards brief in-memory store mutations (contended by the
         # refresh cycle). _enrich_lock serializes whole enrichment runs and may
         # be held across network I/O without blocking the refresh.
@@ -647,7 +651,38 @@ class RohlikAccount(DataUpdateCoordinator[dict]):
                     self.hass, self._auto_enrich_new_orders(new), "rohlik_auto_enrich"
                 )
 
+        await self._update_next_order_items(data)
         return data
+
+    @property
+    def next_order_items(self) -> list[dict] | None:
+        """Line items of the next order (name, amount, textual amount), if fetched."""
+        return self._next_order_items[1] if self._next_order_items else None
+
+    async def _update_next_order_items(self, data: dict) -> None:
+        """Fetch the next order's line items when the order (or its contents) changes."""
+        order = get_earliest_order(data.get("next_order") or [])
+        if order is None:
+            self._next_order_items = None
+            return
+        key = (str(order.get("id")), order.get("itemsCount"), order.get("itemsTotalQuantity"))
+        if self._next_order_items is not None and self._next_order_items[0] == key:
+            return
+        try:
+            detail = await self._client.orders.get_detail(int(order["id"]))
+        except Exception as err:  # noqa: BLE001 - optional extra; never fail the refresh
+            _LOGGER.debug("Failed to fetch items of the next order: %s", err)
+            return
+        if detail is None:
+            return  # retried on the next refresh
+        self._next_order_items = (key, [
+            {
+                "name": item.get("name"),
+                "amount": item.get("amount", 1),
+                "textual_amount": item.get("textualAmount", ""),
+            }
+            for item in detail.get("items") or []
+        ])
 
     async def async_update(self) -> None:
         """Force an immediate data refresh (used by services and after cart changes)."""

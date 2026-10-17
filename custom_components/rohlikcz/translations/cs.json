@@ -245,6 +245,9 @@
       },
       "delivery_minutes": {
         "name": "Minuty do doručení"
+      },
+      "order_edit_deadline": {
+        "name": "Doobjednat do"
       }
     },
     "todo": {

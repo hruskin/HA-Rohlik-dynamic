@@ -207,3 +207,81 @@ async def test_fast_eta_polling_while_courier_is_on_the_way(hass: HomeAssistant,
     await tick(3)  # delivered: no more fast polling
     assert get_announcements.await_count == 4
 
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        # Thursday evening order for Friday morning.
+        ("Váš nákup přivezeme 16.10. v 09:00. Až do pátku 02:50 si k objednávce můžete cokoliv přidat!",
+         datetime(2026, 10, 16, 2, 50, tzinfo=PRAGUE)),
+        ('Až do <span style="color:#009B37">pátku 02:50</span> si k objednávce můžete cokoliv přidat!',
+         datetime(2026, 10, 16, 2, 50, tzinfo=PRAGUE)),
+        ("Až do zítra 06:00 si k objednávce můžete cokoliv přidat!", datetime(2026, 10, 16, 6, 0, tzinfo=PRAGUE)),
+        ("Až do 23:10 si k objednávce můžete cokoliv přidat!", datetime(2026, 10, 15, 23, 10, tzinfo=PRAGUE)),
+        ("Až do čtvrtka 08:00 si k objednávce můžete cokoliv přidat!", datetime(2026, 10, 22, 8, 0, tzinfo=PRAGUE)),
+        ("Kurýr přijede s nákupem přibližně v 10:00. Stále je možné přidávat do objednávky další zboží.", None),
+        (PACKING, None),
+        (ON_THE_WAY, None),
+    ],
+)
+def test_extract_edit_deadline(content: str, expected: datetime | None) -> None:
+    from custom_components.rohlikcz.utils import extract_edit_deadline
+
+    received = datetime(2026, 10, 15, 22, 26, tzinfo=PRAGUE)  # Thursday
+    assert extract_edit_deadline(content, received) == expected
+
+
+async def test_order_edit_deadline_is_kept_for_the_order(hass: HomeAssistant, freezer) -> None:
+    """The deadline from the first announcement stays after Rohlík stops repeating it."""
+    freezer.move_to(datetime(2026, 10, 15, 22, 26, tzinfo=PRAGUE))
+    first = {"id": 7001, "title": "Brzy se vrhneme na váš nákup!", "content":
+             "Váš nákup přivezeme 16.10. v 09:00. Až do pátku 02:50 si k objednávce můžete cokoliv přidat!"}
+    data = _data(first)
+    entry = await _setup(hass, data)
+    deadline_id = _entity_id(hass, "sensor", "order_edit_deadline")
+    expected = datetime(2026, 10, 16, 2, 50, tzinfo=PRAGUE)
+    assert dt_util.parse_datetime(hass.states.get(deadline_id).state) == expected
+
+    later = {"id": 7001, "title": "Už na tom makáme!", "content":
+             "Kurýr přijede s nákupem přibližně v 10:00. Stále je možné přidávat do objednávky další zboží."}
+    entry.runtime_data.async_set_updated_data(_with_announcements(data, later))
+    await hass.async_block_till_done()
+    assert dt_util.parse_datetime(hass.states.get(deadline_id).state) == expected
+
+    delivered = copy.deepcopy(data)
+    delivered["next_order"] = []
+    delivered["delivery_announcements"]["data"]["announcements"] = []
+    entry.runtime_data.async_set_updated_data(delivered)
+    await hass.async_block_till_done()
+    assert hass.states.get(deadline_id).state == "unknown"
+
+
+async def test_next_order_items_are_fetched_once_per_change(hass: HomeAssistant, offline_order_detail) -> None:
+    """The next order's line items show on Next Order and are re-fetched only when it changes."""
+    offline_order_detail.return_value = {"items": [
+        {"name": "Miil Máslo 82%", "amount": 2, "textualAmount": "250 g"},
+        {"name": "BIO kiwi kus", "amount": 4, "textualAmount": "1 ks"},
+    ]}
+    data = _data()
+    data["next_order"][0].update({"itemsCount": 2, "itemsTotalQuantity": 6})
+    entry = await _setup(hass, data)
+    ordered_id = _entity_id(hass, "binary_sensor", "is_ordered")
+    assert hass.states.get(ordered_id).attributes["items"] == [
+        {"name": "Miil Máslo 82%", "amount": 2, "textual_amount": "250 g"},
+        {"name": "BIO kiwi kus", "amount": 4, "textual_amount": "1 ks"},
+    ]
+    assert offline_order_detail.await_count == 1
+
+    with patch("custom_components.rohlikcz.hub.RohlikAPI.get_data", new=AsyncMock(return_value=data)) as get_data:
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+    assert get_data.await_count == 1
+    assert offline_order_detail.await_count == 1  # unchanged order: no new fetch
+
+    more = copy.deepcopy(data)
+    more["next_order"][0].update({"itemsCount": 3, "itemsTotalQuantity": 7})
+    with patch("custom_components.rohlikcz.hub.RohlikAPI.get_data", new=AsyncMock(return_value=more)):
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+    assert offline_order_detail.await_count == 2

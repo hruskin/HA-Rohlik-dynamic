@@ -13,7 +13,7 @@
 > - **Faster live ETA** — while the courier is on the way, the delivery announcement is refreshed every 2 minutes (every minute in the final 15 minutes) instead of every 10, so no polling automation is needed
 > - **Delivery banner card** — a slim full-width dashboard banner showing the order and then the courier, in its own repository [hruskin/rohlik-courier-card](https://github.com/hruskin/rohlik-courier-card)
 >
-> The fork has its own version numbers: `1.0.2` = upstream `1.0.0` + courier tracking. The changes are intended to be sent upstream as a pull request.
+> The fork has its own version numbers: `1.0.3` = upstream `1.0.0` + courier tracking, the add-items deadline and the next order's line items. The changes are intended to be sent upstream as a pull request.
 
 Bring your **[Rohlík.cz](https://www.rohlik.cz)** grocery deliveries into Home Assistant! Track deliveries, monitor your cart, automate shopping, and never miss a delivery window — all from your smart home dashboard.
 
@@ -101,7 +101,7 @@ Enabling analytics triggers a one-time download of your full order history (this
 |--------|-------------|
 | **Premium Membership** | Active when your premium subscription is valid; premium details available as attributes |
 | **Reusable Bags** | Active when reusable bags are enabled on your account |
-| **Next Order** | Active when you have a scheduled upcoming order; order details as attributes |
+| **Next Order** | Active when you have a scheduled upcoming order; order details as attributes, and *(fork)* the order's line items as `items` (`name`, `amount`, `textual_amount`; not recorded in history) |
 | **Timeslot Reservation** | Active when you have a reserved delivery timeslot |
 | **Parents Club** | Active when you are a member of the Parents Club |
 | **Express Available** | Active when express delivery is currently available in your area |
@@ -129,6 +129,7 @@ Enabling analytics triggers a one-time download of your full order history (this
 | **Delivery Slot End** | End of the delivery window for your next order |
 | **Delivery Time** | Predicted exact delivery time for your next order |
 | **Minutes to Delivery** | Minutes until the Delivery Time, updated every minute *(fork)* |
+| **Add Items Until** | Until when items can still be added to the next order, from Rohlík's first announcement after ordering; kept until delivery *(fork)* |
 | **Monthly Spent** | Total amount spent this month |
 | **Yearly Spent** | Total amount spent this year *(requires Spending Analytics)* |
 | **All Time Spent** | Total spent across all tracked orders *(requires Spending Analytics)*; the `by_year` attribute breaks the total down per year (`total` and `order_count` per year) |

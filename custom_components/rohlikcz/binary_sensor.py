@@ -129,6 +129,8 @@ class IsOrderedSensor(BaseEntity, BinarySensorEntity):
 
     _attr_translation_key = "is_ordered"
     _attr_should_poll = False
+    # The line items can be long; keep them out of the recorder.
+    _unrecorded_attributes = frozenset({"items"})
 
     @property
     def is_on(self) -> bool | None:
@@ -140,9 +142,11 @@ class IsOrderedSensor(BaseEntity, BinarySensorEntity):
         next_orders = self._rohlik_account.data.get('next_order', [])
         order = get_earliest_order(next_orders)
         if order:
-            return {
-                "order_data": order
-            }
+            attrs = {"order_data": order}
+            items = self._rohlik_account.next_order_items
+            if items is not None:
+                attrs["items"] = items
+            return attrs
         return None
 
     @property

@@ -205,6 +205,47 @@ def parse_delivery_datetime_string(datetime_str: str) -> datetime | None:
             return None
 
 
+# "Až do pátku 02:50 si k objednávce můžete cokoliv přidat!" – the first
+# announcement after ordering says until when items can still be added.
+_EDIT_DEADLINE_PATTERN = re.compile(
+    r'\b(?:až\s+)?do\s+(?:(\w+)\s+)?(\d{1,2}:\d{2})\b[^.!?]*\bpřidat', re.IGNORECASE
+)
+# Czech weekday stems (any case: "pátku", "pátek", "středy"...) → weekday().
+_WEEKDAY_STEMS = (("pond", 0), ("úter", 1), ("stř", 2), ("čtvrt", 3), ("pát", 4), ("sob", 5), ("neděl", 6))
+
+
+def extract_edit_deadline(
+    text: str, received_at: datetime | None = None, tz: ZoneInfo | None = None
+) -> datetime | None:
+    """Until when items can be added to the order, if the announcement says so."""
+    match = _EDIT_DEADLINE_PATTERN.search(_plain_text(_decode_escapes(text or "")))
+    if not match:
+        return None
+    local_tz = tz or ZoneInfo('Europe/Prague')
+    received_at = (received_at or datetime.now(tz=local_tz)).astimezone(local_tz)
+    hour, minute = map(int, match.group(2).split(':'))
+    if hour > 23 or minute > 59:
+        return None
+    word = (match.group(1) or "").lower()
+    if word.startswith("zítr"):
+        day = received_at.date() + timedelta(days=1)
+    elif word.startswith("dnes"):
+        day = received_at.date()
+    else:
+        weekday = next((wd for stem, wd in _WEEKDAY_STEMS if word.startswith(stem)), None)
+        if weekday is None:
+            return _resolve_clock_time(hour, minute, received_at)
+        day = received_at.date() + timedelta(days=(weekday - received_at.weekday()) % 7)
+    deadline = datetime.combine(day, time(hour, minute), tzinfo=local_tz)
+    if deadline < received_at:
+        deadline += timedelta(days=7 if _is_weekday_word(word) else 1)
+    return deadline
+
+
+def _is_weekday_word(word: str) -> bool:
+    return any(word.startswith(stem) for stem, _ in _WEEKDAY_STEMS)
+
+
 def is_courier_on_the_way(announcement: dict | None) -> bool:
     """Whether a delivery announcement says the courier has left with the order.
 

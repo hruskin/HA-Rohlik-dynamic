@@ -245,6 +245,9 @@
       },
       "delivery_minutes": {
         "name": "Minutes to delivery"
+      },
+      "order_edit_deadline": {
+        "name": "Add items until"
       }
     },
     "todo": {

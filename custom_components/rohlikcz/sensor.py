@@ -18,11 +18,11 @@ from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import dt as dt_util
 from .const import DOMAIN, ICON_UPDATE, ICON_CREDIT, ICON_NO_LIMIT, ICON_FREE_EXPRESS, ICON_DELIVERY, ICON_BAGS, \
     ICON_CART, ICON_ACCOUNT, ICON_EMAIL, ICON_PHONE, ICON_PREMIUM_DAYS, ICON_LAST_ORDER, ICON_NEXT_ORDER_SINCE, \
-    ICON_NEXT_ORDER_TILL, ICON_INFO, ICON_DELIVERY_TIME, ICON_DELIVERY_MINUTES, ICON_MONTHLY_SPENT, ICON_YEARLY_SPENT, ICON_ALLTIME_SPENT, \
+    ICON_NEXT_ORDER_TILL, ICON_ORDER_EDIT_DEADLINE, ICON_INFO, ICON_DELIVERY_TIME, ICON_DELIVERY_MINUTES, ICON_MONTHLY_SPENT, ICON_YEARLY_SPENT, ICON_ALLTIME_SPENT, \
     ICON_CATEGORY_SPENDING
 from .entity import BaseEntity
 from .hub import OrderStore, RohlikAccount
-from .utils import extract_delivery_datetime, get_earliest_order, parse_delivery_datetime_string
+from .utils import extract_delivery_datetime, extract_edit_deadline, get_earliest_order, parse_delivery_datetime_string
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ async def async_setup_entry(
         UpdateSensor(rohlik_hub),
         LastOrder(rohlik_hub),
         NextOrderTill(rohlik_hub),
+        OrderEditDeadline(rohlik_hub),
         NextOrderSince(rohlik_hub),
         DeliveryInfo(rohlik_hub),
         delivery_time,
@@ -1104,6 +1105,66 @@ class NextOrderTill(BaseEntity, SensorEntity):
     @property
     def icon(self) -> str:
         return ICON_NEXT_ORDER_TILL
+
+
+class OrderEditDeadline(BaseEntity, SensorEntity, RestoreEntity):
+    """Sensor for until when items can still be added to the next order.
+
+    Only the first announcement after ordering states it ("Až do pátku 02:50
+    si k objednávce můžete cokoliv přidat!"), so the value is kept for that
+    order once seen, also across restarts.
+    """
+
+    _attr_translation_key = "order_edit_deadline"
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, rohlik_account: RohlikAccount) -> None:
+        super().__init__(rohlik_account)
+        self._order_id: str | None = None
+        self._deadline: datetime | None = None
+
+    @property
+    def native_value(self) -> datetime | None:
+        orders = self._rohlik_account.data.get("next_order", []) or []
+        earliest = get_earliest_order(orders)
+        if earliest is None:
+            self._order_id = self._deadline = None
+            return None
+        order_id = str(earliest.get("id"))
+        announcements = (
+            (self._rohlik_account.data.get("delivery_announcements") or {}).get("data") or {}
+        ).get("announcements") or []
+        for announcement in announcements:
+            if len(orders) > 1 and str(announcement.get("id")) != order_id:
+                continue
+            deadline = extract_edit_deadline(
+                announcement.get("content", ""),
+                self._rohlik_account.announcement_received_at(announcement),
+                tz=self._rohlik_account.timezone,
+            )
+            if deadline is not None:
+                self._order_id, self._deadline = order_id, deadline
+                break
+        return self._deadline if self._order_id == order_id else None
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        return {"order_id": self._order_id} if self._order_id else None
+
+    @property
+    def icon(self) -> str:
+        return ICON_ORDER_EDIT_DEADLINE
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or not last_state.attributes.get("order_id"):
+            return
+        restored = dt_util.parse_datetime(last_state.state)
+        if restored is not None:
+            self._order_id = str(last_state.attributes["order_id"])
+            self._deadline = restored
 
 
 class LastOrder(BaseEntity, SensorEntity):
