@@ -235,7 +235,7 @@ def test_extract_edit_deadline(content: str, expected: datetime | None) -> None:
 async def test_order_edit_deadline_is_kept_for_the_order(hass: HomeAssistant, freezer) -> None:
     """The deadline from the first announcement stays after Rohlík stops repeating it."""
     freezer.move_to(datetime(2026, 10, 15, 22, 26, tzinfo=PRAGUE))
-    first = {"id": 7001, "title": "Brzy se vrhneme na váš nákup!", "content":
+    first = {"id": 7001, "title": "Brzy se vrhneme na váš nákup!", "updatedAt": datetime.now(PRAGUE).isoformat(), "content":
              "Váš nákup přivezeme 16.10. v 09:00. Až do pátku 02:50 si k objednávce můžete cokoliv přidat!"}
     data = _data(first)
     entry = await _setup(hass, data)
@@ -243,7 +243,7 @@ async def test_order_edit_deadline_is_kept_for_the_order(hass: HomeAssistant, fr
     expected = datetime(2026, 10, 16, 2, 50, tzinfo=PRAGUE)
     assert dt_util.parse_datetime(hass.states.get(deadline_id).state) == expected
 
-    later = {"id": 7001, "title": "Už na tom makáme!", "content":
+    later = {"id": 7001, "title": "Už na tom makáme!", "updatedAt": datetime.now(PRAGUE).isoformat(), "content":
              "Kurýr přijede s nákupem přibližně v 10:00. Stále je možné přidávat do objednávky další zboží."}
     entry.runtime_data.async_set_updated_data(_with_announcements(data, later))
     await hass.async_block_till_done()
