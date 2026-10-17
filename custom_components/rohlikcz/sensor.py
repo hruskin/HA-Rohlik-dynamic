@@ -125,7 +125,8 @@ class DeliveryInfo(BaseEntity, SensorEntity, RestoreEntity):
             attrs = {
                 "Delivery time (deprecated, use new entity)": delivery_time,
                 "Order Id": str(delivery_info[0].get("id")),
-                "Updated At": datetime.fromisoformat(delivery_info[0].get("updatedAt")),
+                # Missing on some announcements; don't let it take the sensor down.
+                "Updated At": parse_delivery_datetime_string(delivery_info[0].get("updatedAt")),
                 "Title": delivery_info[0].get("title"),
                 "Additional Content": additional_info
             }
